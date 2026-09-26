@@ -1,4 +1,5 @@
-//SIMPLe JSON PARSER
+//NOT FINISHED YET
+//SUCK JSON PARSER
 #include <iostream>
 #include <vector>
 #include <unordered_map>
@@ -210,7 +211,7 @@ public:
 		fread(code, sizeof(char), f_sz, fp);
 		code[f_sz] = '\0';
 		code_len = f_sz;
-		puts(code);
+		//puts(code);
 		fclose(fp);
 		return true;
 	}
@@ -243,11 +244,13 @@ public:
 				tokbuf += c;
 				c = Next();
 			}
-			if (c == '.') c = Next();
+			if (c != '.') goto l_end;
+			tokbuf += c; c = Next();
 			while (isdigit(c)) {
 				tokbuf += c;
 				c = Next();
 			}
+		l_end:
 			tokbuf += '\0';
 			toktype = JT_Num;
 		}
@@ -355,6 +358,13 @@ public:
 		tree.Dump();
 	}
 };
+//template <class T>
+//class MyJsonAlloc {
+//	using value_type = T;
+//	MyJsonAlloc() noexcept {}
+//	template <class U> MyJsonAlloc(const MyJsonAlloc<U>&) noexcept {}
+//
+//};
 
 
 void myjson_test() {
