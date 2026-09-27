@@ -1,17 +1,19 @@
-//NOT FINISHED YET
-//SUCK JSON PARSER
+// License i dont know but it doesnt mean no license.
+// Schroedinger's License
+//UNGOOd JSON PARSER
 #include <iostream>
 #include <vector>
 #include <unordered_map>
 #include <string>
 
+#include <Windows.h>
 enum {
 	JO_MAX = 10000,
 };
 enum JsonDataType {
 	JDT_null,
 	JDT_bool,
-	//JDT_int,
+	JDT_int,
 	JDT_num,
 	JDT_str,
 	JDT_arr,
@@ -23,6 +25,7 @@ enum JsonTokType{
 	JT_Block_e,
 	JT_Sq,
 	JT_Sq_e,
+	JT_Minus, //-
 	JT_Str,
 	JT_Int,
 	JT_Num,
@@ -33,6 +36,20 @@ enum JsonTokType{
 	JT_false,
 	JT_null,
 };
+std::wstring g_wstr;
+void PrintUtf8(const std::string& utf8)
+{
+	if (utf8.empty()) return;
+
+	int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), (int)utf8.size(), nullptr, 0);
+	g_wstr.resize(utf8.size());
+	//std::wstring wstr(wlen, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, utf8.data(), (int)utf8.size(), g_wstr.data(), wlen);
+
+	HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	DWORD written = 0;
+	WriteConsoleW(hOut, g_wstr.data(), (DWORD)g_wstr.size(), &written, nullptr);
+}
 
 struct MyJsonData;
 typedef std::unordered_map<std::string, MyJsonData>* MyJsonObj;
@@ -55,6 +72,10 @@ public:
 	}
 	void SetBool(bool val) {
 		type = JDT_bool;
+		i = val;
+	}
+	void SetInt(long long val) {
+		type = JDT_int;
 		i = val;
 	}
 	void SetNum(double d) {
@@ -128,6 +149,9 @@ public:
 		case JDT_num:
 			printf("%lf", num);
 			break;
+		case JDT_int:
+			printf("%lld", i);
+			break;
 		case JDT_null:
 			printf("null");
 			break;
@@ -156,6 +180,73 @@ public:
 			}
 			putchar('}');
 			break;
+		}
+	}
+	void DumpString(std::string& strbuf) {
+		char buf[128];
+		switch (type) {
+		case JDT_num:
+			sprintf_s(buf, 128, "%.16lf", num);
+			for (int i = (int)strlen(buf) - 1; i >= 0; i--) {
+				if (buf[i] == '0') continue;
+				else if (buf[i] == '.') {
+					//buf[i + 1] = '0';
+					buf[i + 2] = '\0';
+					break;
+				}
+				else {
+					buf[i + 1] = '\0';
+					break;
+				}
+			}
+			strbuf += buf;
+			break;
+		case JDT_int:
+			sprintf_s(buf, 128, "%lld", i);
+			strbuf += buf;
+			break;
+		case JDT_null:
+			strbuf += "null";
+			break;
+		case JDT_bool:
+			if (i) {
+				strbuf += "true";
+			}
+			else {
+				strbuf += "false";
+			}
+			break;
+		case JDT_str:
+			strbuf += '"';
+			strbuf += str->c_str();
+			strbuf += '"';
+			break;
+		case JDT_arr:
+			strbuf += '[';
+			for (int i = 0; i < (int)arr->size() - 1; i++) {
+				(*arr)[i].DumpString(strbuf);
+				strbuf += ',';
+			}
+			if (arr->size() > 1) {
+				(*arr)[arr->size() - 1].DumpString(strbuf);
+			}
+			strbuf += ']';
+			break;
+		case JDT_obj: {
+			int cnt = 0;
+			strbuf += '{';
+			for (auto a : *obj) {
+				strbuf += '"';
+				strbuf += a.first.c_str();
+				strbuf += '"';
+				strbuf += ':';
+				a.second.DumpString(strbuf);
+				cnt++;
+				if(cnt < obj->size()) strbuf += ',';
+			}
+			strbuf += '}';
+			break;
+		}
 		}
 	}
 private:
@@ -223,7 +314,25 @@ public:
 		tree.Delete();
 	}
 
-
+	void AddUniToUtf8(uint16_t ch) {
+		if (ch <= 0x007f) {
+			tokbuf += (char)ch;
+		}
+		else if (ch <= 0x07ff) {
+			tokbuf += (char)(ch & 0b011110000000);
+			tokbuf += (char)(ch & 0b000001111111);
+		}
+		else if (ch <= 0x07ff) {
+			tokbuf += (char)(((ch & 0b011110000000) >> 7) | 0b11000000);
+			tokbuf += (char)((ch & 0b000001111111) | 0b10000000);
+		}
+		else {
+			//yyyy|yxxxxx|xxxxxx
+			tokbuf += (char)((ch >> 12) | 0b11100000);
+			tokbuf += (char)(((ch >> 6) & 0b000111111) | 0b10000000);
+			tokbuf += (char)((ch & 0b00111111) | 0b10000000);
+		}
+	}
 	char Get() {
 		return code[code_idx];
 	}
@@ -244,19 +353,55 @@ public:
 				tokbuf += c;
 				c = Next();
 			}
-			if (c != '.') goto l_end;
-			tokbuf += c; c = Next();
-			while (isdigit(c)) {
-				tokbuf += c;
-				c = Next();
+			if (c != '.') {
+				tokbuf += '\0';
+				toktype = JT_Int;
+				
 			}
-		l_end:
-			tokbuf += '\0';
-			toktype = JT_Num;
+			else {
+				tokbuf += c; c = Next();
+				while (isdigit(c)) {
+					tokbuf += c;
+					c = Next();
+				}
+				tokbuf += '\0';
+				toktype = JT_Num;
+			}
 		}
 		else if (c == '"') {
 			c = Next();
 			while (c != '"' && c != '\0') {
+				if (c == '\\') {
+					c = Next();
+					if (c == 'u') {
+						uint16_t wc=0u;
+						c = Next();
+						for (int i = 0; i < 4; i++) {
+							wc *= 16u;
+							if (isdigit(c)) { wc += c - '0'; }
+							else if (c >= 'a' || c <= 'f') { wc += c - 'a' + 10; }
+							else if (c >= 'A' || c <= 'F') { wc += c - 'A' + 10; }
+							else return false;
+							c = Next();
+						}
+						AddUniToUtf8(wc);
+						continue;
+					}
+					else if (c == 'n') {
+						c = '\n';
+					}
+					else if (c == 't') {
+						c = '\t';
+					}
+					else if ((c == '\\')||
+						(c=='"')||
+						(c=='\'')) {
+
+					}
+					else {
+						tokbuf += '\\';
+					}
+				}
 				tokbuf += c;
 				c = Next();
 			}
@@ -285,11 +430,15 @@ public:
 			else if (c == ']') toktype = JT_Sq_e;
 			else if (c == ':') toktype = JT_Colon;
 			else if (c == ',') toktype = JT_Comma;
+			else if (c == '-') toktype = JT_Minus;
 			else toktype = JT_None;
 			tokbuf += c;
 			tokbuf += '\0';
 			Next();
 		}
+		//std::cout << code_idx << ':';
+		//PrintUtf8(tokbuf);
+		//std::cout << '\t';
 		return true;
 	}
 	bool State(MyJsonData* ptree) {
@@ -325,9 +474,24 @@ public:
 			}
 			if (toktype != JT_Sq_e)return false;
 			break;
+		case JT_Minus:
+			GetToken();
+			if (toktype == JT_Num) {
+				ptree->SetNum(-atof(tokbuf.c_str()));
+			}
+			else if(toktype == JT_Int) 
+			{
+				ptree->SetInt(-atoll(tokbuf.c_str()));
+			}
+			else return false;
+			break;
 		case JT_Str:case JT_Ident:
 			ptree->SetStr(tokbuf);
 			break;
+		case JT_Int: {
+			ptree->SetInt(atoll(tokbuf.c_str()));
+			break;
+		}
 		case JT_Num: {
 			ptree->SetNum(atof(tokbuf.c_str()));
 			break;
@@ -357,6 +521,10 @@ public:
 		puts("json dump");
 		tree.Dump();
 	}
+	void DumpString(std::string& str) {
+		str.reserve(code_len);
+		tree.DumpString(str);
+	}
 };
 //template <class T>
 //class MyJsonAlloc {
@@ -368,6 +536,10 @@ public:
 
 
 void myjson_test() {
+#ifdef _WIN32
+	//SetConsoleOutputCP(CP_UTF8);
+	//SetConsoleCP(65001);
+#endif
 	JsonParser::InitJsonParser();
 
 	JsonParser json;
@@ -381,7 +553,16 @@ void myjson_test() {
 		json.Delete();
 		return;
 	}
-	json.Dump();
+	std::string str;
+	json.DumpString(str);
+	//PrintUtf8(str);
+	{
+		FILE* fp;
+		fopen_s(&fp, "export.json", "wb");
+		fwrite(&str[0], 1, str.size(), fp);
+		fclose(fp);
+	}
+
 	json.Delete();
 	JsonParser::DeleteJsonParser();
 }
